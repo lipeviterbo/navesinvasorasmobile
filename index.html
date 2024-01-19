@@ -152,6 +152,7 @@
         velocidade_do_invasor = 0.8
       }
       invaders.push({
+        retirou_ponto = false,
         x: Math.random() * (canvas.width - 30),
         y: Math.random() * (canvas.height / 4),
         width: 30,
@@ -252,9 +253,10 @@
           window.location.reload();
           
         }
-        if(invaders[i].y + invaders[i].height>=canvas.height){
+        if((!invaders[i].retirou_ponto)&&(invaders[i].y>=canvas.height)){
+          invaders[i].retirou_ponto = true;
           playSound("perdePonto");
-          score -= 0.25;
+          score -= 4;
         }
       }
 
