@@ -1,0 +1,309 @@
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jogo da Nave com Computação Visual</title>
+  <style>
+    canvas {
+      display: block;
+      margin: auto;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+  .label{
+    font-size: 50px;
+    font-weight: bold;
+  }
+  </style>
+</head>
+<table>
+  <tr>
+    <td>
+   <canvas id="spaceInvadersCanvas" width="500" height="500"></canvas>
+     </td>
+     <td> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>
+  <!-- <button type="button" onclick="init()">Start</button> -->
+  <td>
+    <div><canvas id="canvas"></canvas></div>
+    <div id="maior_probabilidade" class="label"></div>
+    <div id="pontuacao_do_jogo" class="label"></div>
+  </td>
+  </tr>
+</table>
+
+<!-- imagens das naves -->
+<img id="invasorImage" src="./imagens/invasor.png" style="display: none;">
+<img id="nave_principal" src="./imagens/nave_principal.png" style="display: none;">
+
+<!-- sons do jogo-->
+<audio id="somTiro" src="./audios/tiro.mp3"></audio>
+<audio id="morteInvasor" src="./audios/mata_invasor.mp3"></audio>
+<audio id="gameOver" src="./audios/game_over.mp3"></audio>
+<audio id="perdePonto" src="./audios/perde_ponto.mp3"></audio>
+
+<!-- importação dos scripts do teachablemachine -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+<script type="text/javascript">
+    // More API functions here:
+    // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/pose
+
+    // the link to your model provided by Teachable Machine export panel
+    const URL = "https://teachablemachine.withgoogle.com/models/eog72oRMy/";
+    let model, webcam, ctx, labelContainer, maxPredictions, comando, pontuacao_atual;
+
+    async function init() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+
+        // load the model and metadata
+        // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
+        // Note: the pose library adds a tmPose object to your window (window.tmPose)
+        model = await tmPose.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+
+        // Convenience function to setup a webcam
+        const size = 400;
+        const flip = true; // whether to flip the webcam
+        webcam = new tmPose.Webcam(size, size, flip); // width, height, flip
+        await webcam.setup(); // request access to the webcam
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+
+        // append/get elements to the DOM
+        const canvas = document.getElementById("canvas");
+        canvas.width = size; canvas.height = size;
+        ctx = canvas.getContext("2d");
+    }
+
+    async function loop(timestamp) {
+        webcam.update(); // update the webcam frame
+        await predict();
+        window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+        // Prediction #1: run input through posenet
+        // estimatePose can take in an image, video or canvas html element
+        const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+        // Prediction 2: run input through teachable machine classification model
+        const prediction = await model.predict(posenetOutput);
+
+        let vetor_auxiliar = [...prediction];
+        vetor_auxiliar.sort(function compare(a, b) {
+            if (a.probability > b.probability) return -1;
+            if (a.probability < b.probability) return 1;
+            return 0;
+        });
+        document.getElementById("maior_probabilidade").innerHTML="Comando: "+vetor_auxiliar[0].className;
+        comando = vetor_auxiliar[0].className;
+        // console.log(vetor_auxiliar[0].className);
+        drawPose(pose);
+    }
+
+    function drawPose(pose) {
+        if (webcam.canvas) {
+            ctx.drawImage(webcam.canvas, 0, 0);
+            // draw the keypoints and skeleton
+            if (pose) {
+                const minPartConfidence = 0.5;
+                tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+                tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+            }
+        }
+    }
+
+  //// a partir daqui é o código do jogo
+
+  let jogo_rodando = true;
+  
+  document.addEventListener("DOMContentLoaded", () => {
+    // Inicia o vídeo da webcam
+    init();
+
+    const canvas = document.getElementById("spaceInvadersCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Spaceship
+    let spaceship = {
+      x: canvas.width / 2,
+      y: canvas.height - 75,
+      width: 40,
+      height: 70,
+      speed: 10,
+      isShooting: false,
+      bullets: []
+    };
+
+    // Invaders
+    let invaders = [];
+    const initialInvaderCount = 1;
+    const invaderSpawnInterval = 1500; // Intervalo em milissegundos para criar novos invasores
+    let lastSpawnTime = 0;
+
+    function spawnInvader() {
+      let velocidade_do_invasor;
+      if(invaders.length<6){ // os primeiros invasores são mais lentos para poder dar tempo de carregar a imagem da webcam
+        velocidade_do_invasor = 0.1
+      }
+      else{
+        velocidade_do_invasor = 0.8
+      }
+      invaders.push({
+        x: Math.random() * (canvas.width - 30),
+        y: Math.random() * (canvas.height / 4),
+        width: 30,
+        height: 30,
+        speedX: (-1)**parseInt(Math.random() * 20),
+        speedY: velocidade_do_invasor
+      });
+    }
+
+    // Inicializar alguns invasores
+    for (let i = 0; i < initialInvaderCount; i++) {
+      spawnInvader();
+    }
+
+    // Score
+    let score = 0;
+
+    // Função para desenhar na tela
+    function draw() {
+      if(!jogo_rodando){
+        return;
+      }
+      const currentTime = Date.now();    
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      //desenha o fundo do jogo
+      var fundoImg = new Image();
+      fundoImg.src = "./imagens/imagem_fundo.jpg";
+      ctx.drawImage(fundoImg, 0, 0); 
+
+      // Draw spaceship
+      //ctx.fillStyle = "#00F";
+      //ctx.fillRect(spaceship.x, spaceship.y, spaceship.width, spaceship.height);
+      const nave_principalImage = document.getElementById("nave_principal");
+      ctx.drawImage(nave_principalImage,spaceship.x, spaceship.y, spaceship.width, spaceship.height);
+
+      // Draw bullets
+      ctx.fillStyle = "#FF0";
+      for (let i = 0; i < spaceship.bullets.length; i++) {
+        ctx.fillRect(spaceship.bullets[i].x, spaceship.bullets[i].y, 3, 5);
+        spaceship.bullets[i].y -= 5;
+
+        // Check for bullet-invader collision
+        for (let j = 0; j < invaders.length; j++) {
+          if(spaceship.bullets[i]){//faz a verificação de colisão apenas quando o tiro ainda não foi removido
+            if (
+              spaceship.bullets[i].x < invaders[j].x + invaders[j].width &&
+              spaceship.bullets[i].x + 5 > invaders[j].x &&
+              spaceship.bullets[i].y < invaders[j].y + invaders[j].height &&
+              spaceship.bullets[i].y + 10 > invaders[j].y
+            ) {
+              // após verificar a colisão, tanto o invasor quanto o tiro são eliminados e a pontuação aumenta
+              invaders.splice(j, 1);
+              spaceship.bullets.splice(i, 1);
+              score += 10;
+              playSound("morteInvasor"); // Som que será tocado quando o invasor morre
+            }
+          }
+        }
+      }
+
+      // Draw invaders
+      //ctx.fillStyle = "#F00";
+        for (let i = 0; i < invaders.length; i++) {
+            const invasorImage = document.getElementById("invasorImage");
+            ctx.drawImage(invasorImage, invaders[i].x, invaders[i].y, invaders[i].width, invaders[i].height);
+
+        // }
+
+        //       for (let i = 0; i < invaders.length; i++) {
+        //         ctx.fillRect(invaders[i].x, invaders[i].y, invaders[i].width, invaders[i].height);
+
+        // Move invaders
+        invaders[i].x += invaders[i].speedX;
+        invaders[i].y += invaders[i].speedY;
+
+        // Change direction when hitting the canvas edges
+        if (
+          invaders[i].x + invaders[i].width > canvas.width ||
+          invaders[i].x < 0
+        ) {
+          invaders[i].speedX = -invaders[i].speedX;
+        }
+
+        // Check for collision with spaceship
+        if (
+          spaceship.x < invaders[i].x + invaders[i].width &&
+          spaceship.x + spaceship.width > invaders[i].x &&
+          spaceship.y < invaders[i].y + invaders[i].height &&
+          spaceship.y + spaceship.height > invaders[i].y
+        ) {
+
+          jogo_rodando=false;
+          playSound("gameOver"); // Adiciona esta linha para reproduzir o som
+          
+          alert("Perdeu, Trouxa!!! Pontuação: " + score);
+          window.location.reload();
+          
+        }
+        if(invaders[i].y + invaders[i].height>=canvas.height){
+          playSound("perdePonto");
+          score -= 0.25;
+        }
+      }
+
+      pontuacao_atual = score;
+      document.getElementById("pontuacao_do_jogo").innerHTML=" Pontuação: "+score;
+
+      // Verifica se é hora de criar um novo invasor
+      if (currentTime - lastSpawnTime > invaderSpawnInterval) {
+        spawnInvader();
+        lastSpawnTime = currentTime;
+      }
+
+      // dá os comandos de tiro e movimento da nave
+      
+      switch (comando) {
+        case 'tiro':
+            spaceship.bullets.push({ x: spaceship.x + spaceship.width / 2, y: spaceship.y });
+            playSound("somTiro"); // Adiciona esta linha para reproduzir o som
+            break;
+        case 'esquerda':
+        
+            if (spaceship.x > 0) {
+            spaceship.x -= spaceship.speed;
+            }
+            break;
+        case 'direita':
+        
+            if (spaceship.x + spaceship.width < canvas.width) {
+            spaceship.x += spaceship.speed;
+            }
+            break;
+        default:
+          break;      
+      }
+
+      function playSound(elementId) {
+          const sound = document.getElementById(elementId);
+          if (sound) {
+              sound.currentTime = 0; // Reinicia o áudio se já estiver tocando
+              sound.play();
+          }
+      }
+      requestAnimationFrame(draw);
+   
+  }
+    
+    // Start the game loop
+    draw();
+  });
+  
+
+</script>
